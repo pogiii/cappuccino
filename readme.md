@@ -11,7 +11,8 @@ prototype, not a system-wide Caps Lock replacement.
 
 ## Build and run
 
-Requires macOS 13+ and Swift 5.9+ (Xcode or the Xcode command-line tools).
+Requires Xcode 26+ (selected with `xcode-select`) to build the app and compile
+its Icon Composer asset. The built app runs on macOS 13+.
 There are no third-party dependencies.
 
 ```sh
@@ -38,6 +39,9 @@ add the rebuilt app, and relaunch. You can optionally build with
 
 To explore in Xcode, open `Package.swift`. Use the script above to produce the
 permission-bearing app bundle.
+
+The editable app icon is `Assets/app.icon`. The build script compiles it into
+`Assets.car` and a legacy `app.icns` fallback in the app bundle before signing.
 
 ## Behavior and limits
 

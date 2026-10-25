@@ -10,6 +10,10 @@
     <string>Cappuccino</string>
     <key>CFBundleDisplayName</key>
     <string>Cappuccino</string>
+    <key>CFBundleIconName</key>
+    <string>app</string>
+    <key>CFBundleIconFile</key>
+    <string>app</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
