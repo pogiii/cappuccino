@@ -1,4 +1,8 @@
-# Cappuccino
+<p align="center">
+  <img src="Assets/icon-preview.png" alt="Cappuccino app icon" width="160">
+</p>
+
+<h1 align="center">Cappuccino</h1>
 
 A tiny native macOS menu-bar **prototype**: Caps Lock's LED is the stay-awake
 switch. On keeps the Mac and display awake (like `caffeinate -i -d`); off restores
