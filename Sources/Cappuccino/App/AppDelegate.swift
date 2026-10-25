@@ -1,10 +1,14 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let controller = AwakeController(
-        keyboard: MacCapsLockKeyboard(), sleep: MacSleepPrevention()
-    )
+    private let capsLock: CapsLockTrigger
     private var statusBar: StatusBarController?
+
+    override init() {
+        let keepAwake = KeepAwakeController(sleep: MacSleepPrevention())
+        capsLock = CapsLockTrigger(keyboard: MacCapsLockKeyboard(), keepAwake: keepAwake)
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Avoid multiple instances fighting over the LED and power assertions.
@@ -14,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        statusBar = StatusBarController(controller: controller)
+        statusBar = StatusBarController(capsLock: capsLock)
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(pause),
                            name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
@@ -24,19 +28,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                            name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
         center.addObserver(self, selector: #selector(resume),
                            name: NSWorkspace.didWakeNotification, object: nil)
-        controller.start()
+        capsLock.start()
     }
 
     @objc private func pause(_ notification: Notification) {
-        controller.stop(message: "Paused while the Mac sleeps or your session is inactive.")
+        capsLock.stop(message: "Paused while the Mac sleeps or your session is inactive.")
     }
 
     @objc private func resume(_ notification: Notification) {
-        controller.start()
+        capsLock.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
-        controller.stop()
+        capsLock.stop()
     }
 }

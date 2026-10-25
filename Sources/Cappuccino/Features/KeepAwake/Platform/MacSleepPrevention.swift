@@ -13,7 +13,7 @@ final class MacSleepPrevention: SleepPrevention {
                 let result = IOPMAssertionCreateWithName(
                     type as CFString,
                     IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                    "Cappuccino: Caps Lock stay-awake mode" as CFString,
+                    "Cappuccino: Keep Awake" as CFString,
                     &id
                 )
                 guard result == kIOReturnSuccess else {

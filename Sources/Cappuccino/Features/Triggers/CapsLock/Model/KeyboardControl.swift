@@ -1,4 +1,4 @@
-/// Implementations deliver callbacks on the same thread as the controller.
+/// Implementations deliver callbacks on the same thread as the trigger.
 protocol KeyboardControl: AnyObject {
     var onCapsLockChange: ((Bool) -> Void)? { get set }
     var onFailure: ((Error) -> Void)? { get set }
