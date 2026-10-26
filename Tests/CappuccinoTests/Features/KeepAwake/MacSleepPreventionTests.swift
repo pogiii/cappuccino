@@ -3,17 +3,18 @@ import XCTest
 @testable import Cappuccino
 
 final class MacSleepPreventionTests: XCTestCase {
-    /// Exercises the real model → macOS power adapter → IOKit chain.
+    /// Exercises the real trigger → Keep Awake → macOS power adapter chain.
     func testRealAssertionsAreCreatedAndReleased() throws {
         let power = MacSleepPrevention()
         defer { try? power.stop() }
         let keyboard = IntegrationKeyboard()
-        let controller = AwakeController(keyboard: keyboard, sleep: power)
+        let keepAwake = KeepAwakeController(sleep: power)
+        let controller = CapsLockTrigger(keyboard: keyboard, keepAwake: keepAwake)
         controller.start()
         controller.toggle()
 
         XCTAssertNil(controller.state.message)
-        XCTAssertTrue(controller.state.isAwake)
+        XCTAssertTrue(controller.state.isOn)
         XCTAssertEqual(try Set(ownAssertionTypes()), [
             kIOPMAssertionTypePreventUserIdleSystemSleep,
             kIOPMAssertionTypePreventUserIdleDisplaySleep
@@ -23,6 +24,22 @@ final class MacSleepPreventionTests: XCTestCase {
         XCTAssertNil(controller.state.message)
         XCTAssertEqual(try ownAssertionTypes(), [])
         controller.stop()
+    }
+
+    func testRealAssertionsRemainUntilLastRequestEnds() throws {
+        let power = MacSleepPrevention()
+        defer { try? power.stop() }
+        let keepAwake = KeepAwakeController(sleep: power)
+        let first = KeepAwakeController.RequestID()
+        let second = KeepAwakeController.RequestID()
+        try keepAwake.acquire(first)
+        try keepAwake.acquire(second)
+        XCTAssertEqual(try ownAssertionTypes().count, 2)
+
+        try keepAwake.release(first)
+        XCTAssertEqual(try ownAssertionTypes().count, 2)
+        try keepAwake.release(second)
+        XCTAssertEqual(try ownAssertionTypes(), [])
     }
 
     func testStartAndStopAreIdempotent() throws {

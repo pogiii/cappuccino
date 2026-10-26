@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 final class StatusBarController: NSObject {
-    private let controller: AwakeController
+    private let capsLock: CapsLockTrigger
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let summary = NSMenuItem()
     private let detail = NSMenuItem()
@@ -13,8 +13,8 @@ final class StatusBarController: NSObject {
         title: "Retry Keyboard Connection", action: #selector(retry), keyEquivalent: ""
     )
 
-    init(controller: AwakeController) {
-        self.controller = controller
+    init(capsLock: CapsLockTrigger) {
+        self.capsLock = capsLock
         super.init()
 
         let menu = NSMenu()
@@ -39,34 +39,34 @@ final class StatusBarController: NSObject {
         menu.addItem(quit)
         item.menu = menu
 
-        controller.onStateChange = { [weak self] state in self?.render(state) }
-        render(controller.state)
+        capsLock.onStateChange = { [weak self] state in self?.render(state) }
+        render(capsLock.state)
     }
 
-    private func render(_ state: AwakeState) {
+    private func render(_ state: CapsLockState) {
         let symbol = !state.isRunning ? "exclamationmark.circle" :
-            (state.isAwake ? "cup.and.saucer.fill" : "cup.and.saucer")
+            (state.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
         item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Cappuccino")
         item.button?.image?.isTemplate = true
         let title = !state.isRunning ? "Cappuccino — Not Connected" :
-            (state.isAwake ? "Cappuccino — Keeping Mac Awake" : "Cappuccino — Normal Sleep")
+            (state.isOn ? "Cappuccino — Keeping Mac Awake" : "Cappuccino — Normal Sleep")
         summary.title = title
         detail.title = state.message == nil
             ? "Caps Lock LED = stay-awake mode"
             : "Connection issue — click Retry for details"
         item.button?.toolTip = state.message.map { "\(title)\n\($0)" } ?? title
         toggleItem.isEnabled = state.isRunning
-        toggleItem.state = state.isAwake ? .on : .off
+        toggleItem.state = state.isOn ? .on : .off
         retryItem.isHidden = state.isRunning
     }
 
     @objc private func toggle() {
-        controller.toggle()
+        capsLock.toggle()
     }
 
     @objc private func retry() {
-        controller.start()
-        if let message = controller.state.message {
+        capsLock.start()
+        if let message = capsLock.state.message {
             let alert = NSAlert()
             alert.messageText = "Cappuccino could not connect"
             alert.informativeText = message

@@ -82,17 +82,49 @@ are used by the app.
 ```text
 Sources/Cappuccino/
   App/                         # Composition and app/session lifecycle
-  Features/StayAwake/
-    Model/                     # State, behavior, dependency protocols
     UI/                        # AppKit menu and presentation
-    Platform/                  # Core Graphics / IOKit implementations
-Tests/CappuccinoTests/Features/StayAwake/
+  Features/
+    KeepAwake/
+      Model/                   # Request ownership and sleep-prevention protocol
+      Platform/                # IOKit power assertions
+    Triggers/CapsLock/
+      Model/                   # Manual request, keyboard safety and protocol
+      Platform/                # Core Graphics / IOKit keyboard implementation
+Tests/CappuccinoTests/Features/
+  KeepAwake/
+  Triggers/CapsLock/
 ```
 
-The model has no AppKit, Core Graphics, or IOKit imports. UI forwards actions
-and renders state; platform adapters implement model protocols. Everything
-runs on the main run loop. One module keeps the feature together; folder
-boundaries are conventions, not separate Swift module access restrictions.
+Keep Awake owns sleep prevention; triggers request it. The dependency direction
+is `App → Triggers → KeepAwake`, never the reverse. The app constructs concrete
+platform adapters; models have no AppKit, Core Graphics, or IOKit imports.
+Everything runs on the main run loop. This remains one Swift module; folder
+boundaries are conventions, not separate module access restrictions.
+
+### Ownership rules
+
+- `KeepAwakeController` accepts opaque request IDs. The first acquisition starts
+  power assertions; the last release stops them. Repeated acquisition/release of
+  the same ID is idempotent. A trigger releases only its own ID.
+- `CapsLockTrigger` owns one manual request shared by the key and menu toggle.
+  It also owns keyboard connection safety and the LED. Its `isOn` state is manual
+  intent, distinct from Keep Awake's aggregate `isAwake` state.
+- Keyboard/indicator failure releases the manual request, not other requests.
+  Power failures are thrown to the caller, never reported as successful awake
+  state. Cleanup must succeed before new acquisitions are accepted; failed
+  releases retain their request so cleanup can be retried.
+- On destruction, a trigger abandons only its own request. Keep Awake retains
+  any cleanup failure without retaining the dead owner's ID; a replacement
+  trigger's startup retries cleanup before reconnecting the keyboard.
+- The app owns presentation and session lifecycle. Currently Caps Lock is the
+  only trigger, so the menu still renders its state and behavior is unchanged.
+  Before exposing another trigger, aggregate power status must be presented
+  separately from each trigger's state.
+
+This is a structural foundation, not agent integration. Request IDs are local
+ownership handles, not expiring leases or public API credentials. Agent
+lifetimes, request metadata, CLI/MCP interfaces, and additional UI are deferred.
+There is no trigger registry or plugin framework.
 
 ## Checks
 
@@ -101,8 +133,9 @@ swift test
 sh Scripts/build-app.sh
 ```
 
-Tests cover state transitions, cleanup, failures, duplicate events, event-flag
-filtering, and real IOKit assertion acquisition/release. They do **not** grant
+Tests cover independent request ownership, trigger state transitions, cleanup,
+failures, duplicate events, event-flag filtering, and real IOKit assertion
+acquisition/release. They do **not** grant
 Accessibility permission, tap your live keyboard, or prove LED/typing behavior.
 
 ### Hands-on acceptance test
