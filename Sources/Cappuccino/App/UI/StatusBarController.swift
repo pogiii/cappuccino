@@ -1,6 +1,36 @@
 import AppKit
 import ApplicationServices
 
+/// Keeps power truth separate from keyboard/indicator warnings.
+struct StatusBarPresentation {
+    let symbol: String
+    let title: String
+    let detail: String
+    let tooltip: String
+    let toggleEnabled: Bool
+    let retryVisible: Bool
+
+    init(state: CapsLockState) {
+        symbol = state.isOn ? "cup.and.saucer.fill" :
+            (state.isRunning ? "cup.and.saucer" : "exclamationmark.circle")
+        title = state.isOn ? "Cappuccino — Keeping Mac Awake" :
+            (state.isRunning ? "Cappuccino — Normal Sleep" : "Cappuccino — Not Connected")
+        if state.indicatorMessage != nil {
+            detail = state.message != nil
+                ? "Keyboard and LED need attention — click Retry"
+                : "LED needs attention — click Retry"
+        } else if state.message != nil {
+            detail = state.isOn ? "Keyboard paused — still keeping Mac awake" :
+                "Keyboard disconnected — click Retry"
+        } else {
+            detail = "Caps Lock LED = stay-awake mode"
+        }
+        tooltip = ([title] + state.issues).joined(separator: "\n")
+        toggleEnabled = state.isRunning || state.isOn
+        retryVisible = !state.isRunning || state.indicatorMessage != nil
+    }
+}
+
 final class StatusBarController: NSObject {
     private let capsLock: CapsLockTrigger
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -10,7 +40,7 @@ final class StatusBarController: NSObject {
         title: "Keep Mac Awake", action: #selector(toggle), keyEquivalent: ""
     )
     private let retryItem = NSMenuItem(
-        title: "Retry Keyboard Connection", action: #selector(retry), keyEquivalent: ""
+        title: "Retry Connections", action: #selector(retry), keyEquivalent: ""
     )
 
     init(capsLock: CapsLockTrigger) {
@@ -44,20 +74,15 @@ final class StatusBarController: NSObject {
     }
 
     private func render(_ state: CapsLockState) {
-        let symbol = !state.isRunning ? "exclamationmark.circle" :
-            (state.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
-        item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Cappuccino")
+        let view = StatusBarPresentation(state: state)
+        item.button?.image = NSImage(systemSymbolName: view.symbol, accessibilityDescription: "Cappuccino")
         item.button?.image?.isTemplate = true
-        let title = !state.isRunning ? "Cappuccino — Not Connected" :
-            (state.isOn ? "Cappuccino — Keeping Mac Awake" : "Cappuccino — Normal Sleep")
-        summary.title = title
-        detail.title = state.message == nil
-            ? "Caps Lock LED = stay-awake mode"
-            : "Connection issue — click Retry for details"
-        item.button?.toolTip = state.message.map { "\(title)\n\($0)" } ?? title
-        toggleItem.isEnabled = state.isRunning
+        summary.title = view.title
+        detail.title = view.detail
+        item.button?.toolTip = view.tooltip
+        toggleItem.isEnabled = view.toggleEnabled
         toggleItem.state = state.isOn ? .on : .off
-        retryItem.isHidden = state.isRunning
+        retryItem.isHidden = !view.retryVisible
     }
 
     @objc private func toggle() {
@@ -65,11 +90,12 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func retry() {
-        capsLock.start()
-        if let message = capsLock.state.message {
+        capsLock.retry()
+        let issues = capsLock.state.issues
+        if !issues.isEmpty {
             let alert = NSAlert()
-            alert.messageText = "Cappuccino could not connect"
-            alert.informativeText = message
+            alert.messageText = "Cappuccino connections need attention"
+            alert.informativeText = issues.joined(separator: "\n")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }

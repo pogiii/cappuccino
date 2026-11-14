@@ -9,7 +9,9 @@ final class MacSleepPreventionTests: XCTestCase {
         defer { try? power.stop() }
         let keyboard = IntegrationKeyboard()
         let keepAwake = KeepAwakeController(sleep: power)
-        let controller = CapsLockTrigger(keyboard: keyboard, keepAwake: keepAwake)
+        let controller = CapsLockTrigger(
+            keyboard: keyboard, keepAwake: keepAwake, indicator: keyboard.led.controller
+        )
         controller.start()
         controller.toggle()
 
@@ -24,6 +26,62 @@ final class MacSleepPreventionTests: XCTestCase {
         XCTAssertNil(controller.state.message)
         XCTAssertEqual(try ownAssertionTypes(), [])
         controller.stop()
+    }
+
+    func testRealAssertionsSurviveLockKeyboardInterruptionAndUnlock() throws {
+        let power = MacSleepPrevention()
+        defer { try? power.stop() }
+        let keyboard = IntegrationKeyboard()
+        let controller = CapsLockTrigger(
+            keyboard: keyboard, keepAwake: KeepAwakeController(sleep: power),
+            indicator: keyboard.led.controller
+        )
+        let app = AppDelegate(capsLock: controller)
+        controller.start()
+        controller.toggle()
+        app.pause(Notification(name: AppDelegate.screenDidLock))
+        keyboard.onFailure?(NSError(domain: "Keyboard suspended", code: 1))
+
+        XCTAssertFalse(controller.state.isRunning)
+        XCTAssertTrue(controller.state.isOn)
+        XCTAssertTrue(keyboard.led.output.isOn)
+        keyboard.led.output.states = [.off]
+        keyboard.led.scheduler.tick()
+        XCTAssertTrue(keyboard.led.output.isOn)
+        XCTAssertEqual(try Set(ownAssertionTypes()), [
+            kIOPMAssertionTypePreventUserIdleSystemSleep,
+            kIOPMAssertionTypePreventUserIdleDisplaySleep
+        ])
+
+        app.resume(Notification(name: AppDelegate.screenDidUnlock))
+        XCTAssertTrue(controller.state.isRunning)
+        XCTAssertTrue(controller.state.isOn)
+        XCTAssertEqual(try ownAssertionTypes().count, 2)
+
+        controller.stop()
+        XCTAssertEqual(try ownAssertionTypes(), [])
+        XCTAssertEqual(keyboard.led.output.writes.last, "Auto")
+        XCTAssertEqual(keyboard.led.scheduler.activeCount, 0)
+    }
+
+    func testRealPowerAssertionsSurviveLEDOnlyFailure() throws {
+        let power = MacSleepPrevention()
+        defer { try? power.stop() }
+        let keyboard = IntegrationKeyboard()
+        keyboard.led.output.onError = TestLEDError.failed
+        let trigger = CapsLockTrigger(
+            keyboard: keyboard, keepAwake: KeepAwakeController(sleep: power),
+            indicator: keyboard.led.controller
+        )
+        trigger.start()
+        trigger.toggle()
+
+        XCTAssertTrue(trigger.state.isRunning)
+        XCTAssertTrue(trigger.state.isOn)
+        XCTAssertNotNil(trigger.state.indicatorMessage)
+        XCTAssertEqual(try ownAssertionTypes().count, 2)
+        trigger.stop()
+        XCTAssertEqual(try ownAssertionTypes(), [])
     }
 
     func testRealAssertionsRemainUntilLastRequestEnds() throws {
@@ -69,9 +127,11 @@ final class MacSleepPreventionTests: XCTestCase {
 }
 
 private final class IntegrationKeyboard: KeyboardControl {
-    var onCapsLockChange: ((Bool) -> Void)?
+    var onToggle: (() -> Void)?
     var onFailure: ((Error) -> Void)?
+    let led = LEDTestRig()
+    var canConnect = true
     func start() throws {}
-    func setIndicator(isOn: Bool) throws {}
+    func resetCapsLock() throws {}
     func stop() {}
 }
