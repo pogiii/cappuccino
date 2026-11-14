@@ -3,21 +3,24 @@ import Carbon.HIToolbox
 import Foundation
 import IOKit.hidsystem
 
-/// Prototype strategy: leave the native Caps Lock state/LED coupled, but remove
-/// its modifier from events before applications receive them. No key remapping,
-/// Unicode rewriting, private LED API, or persistent system settings.
+/// Input-filter prototype: remove the native Caps Lock modifier from events.
+/// LED output is owned separately and never enables the native modifier.
 ///
 /// This does NOT change the global modifier state queried directly by other
 /// software. Secure Input bypasses event taps, so monitoring is stopped there.
 final class MacCapsLockKeyboard: KeyboardControl {
-    var onCapsLockChange: ((Bool) -> Void)?
+    var onToggle: (() -> Void)?
     var onFailure: ((Error) -> Void)?
+
+    var canConnect: Bool {
+        AXIsProcessTrusted() && !IsSecureEventInputEnabled()
+    }
 
     private var connection: io_connect_t = 0
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var safetyTimer: Timer?
-    private var lastCapsLockState = false
+    private var keyState = KeyState()
     private var generation = 0
 
     func start() throws {
@@ -78,12 +81,12 @@ final class MacCapsLockKeyboard: KeyboardControl {
         }
     }
 
-    func setIndicator(isOn: Bool) throws {
+    func resetCapsLock() throws {
         guard connection != 0 else { throw KeyboardError.systemUnavailable }
-        if isOn && IsSecureEventInputEnabled() { throw KeyboardError.secureInput }
-        let result = IOHIDSetModifierLockState(connection, Int32(kIOHIDCapsLockState), isOn)
+        // Bookkeeping comes first so our synthetic reset cannot become a toggle.
+        keyState.reset()
+        let result = IOHIDSetModifierLockState(connection, Int32(kIOHIDCapsLockState), false)
         guard result == kIOReturnSuccess else { throw KeyboardError.ioKit(result) }
-        lastCapsLockState = isOn
     }
 
     func stop() throws {
@@ -91,8 +94,9 @@ final class MacCapsLockKeyboard: KeyboardControl {
         safetyTimer?.invalidate()
         safetyTimer = nil
         var resetResult = kIOReturnSuccess
-        // Turn Caps Lock off before removing the filter. The regular key
-        // behavior returns once the event tap is invalidated.
+        // Reset native Caps Lock before removing the filter. The independent
+        // LED override is deliberately not released by keyboard suspension.
+        keyState.reset()
         if connection != 0 {
             resetResult = IOHIDSetModifierLockState(connection, Int32(kIOHIDCapsLockState), false)
             IOServiceClose(connection)
@@ -104,7 +108,6 @@ final class MacCapsLockKeyboard: KeyboardControl {
         if let tap { CFMachPortInvalidate(tap) }
         source = nil
         tap = nil
-        lastCapsLockState = false
         if resetResult != kIOReturnSuccess { throw KeyboardError.resetFailed(resetResult) }
     }
 
@@ -119,19 +122,38 @@ final class MacCapsLockKeyboard: KeyboardControl {
             return Unmanaged.passUnretained(event)
         }
 
-        if type == .flagsChanged {
-            let isOn = event.flags.contains(.maskAlphaShift)
-            if isOn != lastCapsLockState {
-                lastCapsLockState = isOn
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.tap != nil, self.generation == eventGeneration else { return }
-                    self.onCapsLockChange?(isOn)
-                }
+        if keyState.shouldToggle(event) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.tap != nil, self.generation == eventGeneration else { return }
+                self.onToggle?()
             }
         }
 
         Self.removeCapsLock(from: event)
         return Unmanaged.passUnretained(event)
+    }
+
+    struct KeyState {
+        private var lastNativeState = false
+
+        mutating func reset() { lastNativeState = false }
+
+        mutating func shouldToggle(_ event: CGEvent) -> Bool {
+            guard let isOn = MacCapsLockKeyboard.requestedCapsLockState(from: event),
+                  isOn != lastNativeState else { return false }
+            lastNativeState = isOn
+            return true
+        }
+    }
+
+    /// A change in global modifier state is not itself a user toggle. Only
+    /// Caps Lock key events may change the request, not unrelated modifier events.
+    static func requestedCapsLockState(from event: CGEvent) -> Bool? {
+        guard event.type == .flagsChanged,
+              event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_CapsLock) else {
+            return nil
+        }
+        return event.flags.contains(.maskAlphaShift)
     }
 
     /// Preserve Shift, Option, shortcuts, layouts, and text; never lowercase
@@ -172,15 +194,15 @@ private enum KeyboardError: LocalizedError {
         case .accessibility:
             return "Allow Cappuccino in System Settings → Privacy & Security → Accessibility, then retry."
         case .secureInput:
-            return "Paused for Secure Input (for example, a password field). Leave that field, then retry."
+            return "Keyboard control is paused for Secure Input (for example, a password field). Keep-awake mode is unchanged; reconnection is automatic when available."
         case .systemUnavailable:
             return "The macOS keyboard service is unavailable."
         case .eventTap:
             return "Could not filter keyboard events. Check Accessibility permission, then quit and reopen Cappuccino."
         case .interrupted:
-            return "macOS interrupted the keyboard filter. Stay-awake mode has stopped. Retry to reconnect."
+            return "macOS interrupted the keyboard filter. Keyboard control is paused; keep-awake mode is unchanged."
         case .ioKit(let code):
-            return "Could not set Caps Lock and its LED (IOKit \(code))."
+            return "Could not reset native Caps Lock (IOKit \(code))."
         case .resetFailed(let code):
             return "Could not turn Caps Lock off (IOKit \(code)). Quit Cappuccino and check Caps Lock before typing."
         }
